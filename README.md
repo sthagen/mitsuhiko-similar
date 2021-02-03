@@ -10,26 +10,45 @@ algorithms and high level interfaces for it.  It is based on the [pijul](https:/
 implementation of the Myer's and Patience algorithms and inherits some ideas
 from there.
 
-It's intended to be replacement for the popular but unmaintained
-[difference] crate.
-
 ```rust
-use similar::algorithms::Algorithm;
-use similar::text::unified_diff;
+use similar::{ChangeTag, TextDiff};
 
-let udiff = unified_diff(
-    Algorithm::Patience,
-    old_text,
-    new_text,
-    3,
-    Some(("old.txt", "new.text"))
-);
-println!("{}", udiff);
+fn main() {
+    let diff = TextDiff::from_lines(
+        "Hello World\nThis is the second line.\nThis is the third.",
+        "Hallo Welt\nThis is the second line.\nThis is life.\nMoar and more",
+    );
+
+    for op in diff.ops() {
+        for change in diff.iter_changes(op) {
+            let sign = match change.tag() {
+                ChangeTag::Delete => "-",
+                ChangeTag::Insert => "+",
+                ChangeTag::Equal => " ",
+            };
+            print!("{}{}", sign, change);
+        }
+    }
+}
 ```
+
+## Screenshot
+
+![terminal highlighting](https://raw.githubusercontent.com/mitsuhiko/similar/main/assets/terminal-inline.png)
+
+## What's in the box?
+
+* Myer's diff
+* Patience diff
+* Diffing on arbitrary comparable sequences
+* Line, word, character and grapheme level diffing
+* Text and Byte diffing
+* Unified diff generation
 
 ## License and Links
 
 - [Documentation](https://docs.rs/similar/)
 - [Issue Tracker](https://github.com/mitsuhiko/similar/issues)
+- [Examples](https://github.com/mitsuhiko/similar/tree/main/examples)
 - License: [Apache-2.0](https://github.com/mitsuhiko/similar/blob/main/LICENSE)
 

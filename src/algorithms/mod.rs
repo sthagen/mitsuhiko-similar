@@ -6,16 +6,33 @@
 //! direct access to these algorithms can be useful in some cases.
 //!
 //! All these algorithms provide a `diff` function which takes two indexable
-//! objects (for instance slices) and a [`DiffHook`].  As the diff is generated
-//! the diff hook is invoked.  Note that the diff hook does not get access to
-//! the actual values but only the indexes.  This is why the diff hook is not
-//! used outside of the raw algorithm implementations as for most situations
-//! access to the values is useful of required.
+//! objects (for instance slices) and a [`DiffHook`].  As the
+//! diff is generated the diff hook is invoked.  Note that the diff hook does
+//! not get access to the actual values but only the indexes.  This is why the
+//! diff hook is not used outside of the raw algorithm implementations as for
+//! most situations access to the values is useful of required.
 //!
-//! Most of the crate operates on the [`Algorithm`] enum which abstracts over
-//! the different algorithms.
+//! The algoriths module really is the most low-level module in similar and
+//! generally not the place to start.
+//!
+//! # Example
+//!
+//! This is a simple example that shows how you can calculate the difference
+//! between two sequences and capture the ops into a vector.
+//!
+//! ```rust
+//! use similar::algorithms::{Algorithm, Replace, Capture, diff_slices};
+//!
+//! let a = vec![1, 2, 3, 4, 5];
+//! let b = vec![1, 2, 3, 4, 7];
+//! let mut d = Replace::new(Capture::new());
+//! diff_slices(Algorithm::Myers, &mut d, &a, &b).unwrap();
+//! let ops = d.into_inner().into_ops();
+//! ```
+//!
+//! The above example is equivalen to using
+//! [`capture_diff_slices`](crate::capture_diff_slices).
 
-// general traits and utilities
 mod capture;
 mod hook;
 mod replace;
@@ -23,27 +40,15 @@ mod replace;
 use std::hash::Hash;
 use std::ops::{Index, Range};
 
-pub use capture::*;
-pub use hook::*;
-pub use replace::*;
+pub use capture::Capture;
+pub use hook::DiffHook;
+pub use replace::Replace;
 
-// actual diffing algorithms
+#[doc(no_inline)]
+pub use crate::Algorithm;
+
 pub mod myers;
 pub mod patience;
-
-/// An enum representing a diffing algorithm.
-#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub enum Algorithm {
-    Myers,
-    Patience,
-}
-
-impl Default for Algorithm {
-    /// Returns the default algorithm ([`Algorithm::Myers`]).
-    fn default() -> Algorithm {
-        Algorithm::Myers
-    }
-}
 
 /// Creates a diff between old and new with the given algorithm.
 ///
@@ -76,36 +81,4 @@ where
     T: Eq + Hash + Ord,
 {
     diff(alg, d, old, 0..old.len(), new, 0..new.len())
-}
-
-/// Creates a diff between old and new with the given algorithm capturing the ops.
-///
-/// This is like [`diff`] but instead of using an arbitrary hook this will
-/// always use [`Replace`] + [`Capture`] and return the captured [`DiffOp`]s.
-pub fn capture_diff<Old, New>(
-    alg: Algorithm,
-    old: &Old,
-    old_range: Range<usize>,
-    new: &New,
-    new_range: Range<usize>,
-) -> Vec<DiffOp>
-where
-    Old: Index<usize> + ?Sized,
-    New: Index<usize> + ?Sized,
-    Old::Output: Hash + Eq + Ord,
-    New::Output: PartialEq<Old::Output> + Hash + Eq + Ord,
-{
-    let mut d = Replace::new(Capture::new());
-    diff(alg, &mut d, old, old_range, new, new_range).unwrap();
-    d.into_inner().into_ops()
-}
-
-/// Creates a diff between old and new with the given algorithm capturing the ops.
-pub fn capture_diff_slices<T>(alg: Algorithm, old: &[T], new: &[T]) -> Vec<DiffOp>
-where
-    T: Eq + Hash + Ord,
-{
-    let mut d = Replace::new(Capture::new());
-    diff_slices(alg, &mut d, old, new).unwrap();
-    d.into_inner().into_ops()
 }

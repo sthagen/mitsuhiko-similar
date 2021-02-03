@@ -1,6 +1,6 @@
 [package]
 name = "similar"
-version = "0.2.0"
+version = "0.5.0"
 authors = ["Armin Ronacher <armin.ronacher@active-4.com>", "Pierre-Étienne Meunier <pe@pijul.org>"]
 edition = "2018"
 license = "Apache-2.0"
@@ -8,6 +8,43 @@ description = "A diff library for Rust"
 repository = "https://github.com/mitsuhiko/similar"
 keywords = ["diff", "difference", "patience", "compare", "changes"]
 readme = "README.md"
+exclude = [
+    "assets/*"
+]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["text"]
+text = []
+inline = ["unicode"]
+
+# this annoyingly currently also turns on bstr and not just bstr/unicode
+# unclear if this is fixable
+unicode = ["text", "unicode-segmentation", "bstr/unicode"]
+bytes = ["bstr", "text"]
 
 [dev-dependencies]
 insta = "1.5.2"
+console = "0.14.0"
+
+[dependencies]
+unicode-segmentation = { version = "1.7.1", optional = true }
+bstr = { version = "0.2.14", optional = true, default-features = false }
+
+[[example]]
+name = "terminal"
+required-features = ["text"]
+
+[[example]]
+name = "terminal-inline"
+required-features = ["text", "inline", "bytes"]
+
+[[example]]
+name = "udiff"
+required-features = ["text", "bytes"]
+
+[[example]]
+name = "close-matches"
+required-features = ["text"]

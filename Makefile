@@ -7,7 +7,10 @@ doc:
 	@cargo doc --all-features
 
 test:
+	@cargo test
 	@cargo test --all-features
+	@cargo test --no-default-features
+	@cargo test --no-default-features --features bytes
 
 format:
 	@rustup component add rustfmt 2> /dev/null

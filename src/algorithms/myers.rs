@@ -67,6 +67,7 @@ where
     New: Index<usize> + ?Sized,
     New::Output: PartialEq<Old::Output>,
 {
+    #![allow(clippy::many_single_char_names)]
     if old_end > old_current && new_end > new_current {
         let old_span = old_end - old_current;
         let new_span = new_end - new_current;
@@ -185,26 +186,7 @@ fn test_diff() {
 
     let mut d = crate::algorithms::Replace::new(crate::algorithms::Capture::new());
     diff_slices(&mut d, a, b).unwrap();
-    insta::assert_debug_snapshot!(d.into_inner().ops(), @r###"
-    [
-        Equal {
-            old_index: 0,
-            new_index: 0,
-            len: 3,
-        },
-        Replace {
-            old_index: 3,
-            old_len: 1,
-            new_index: 3,
-            new_len: 1,
-        },
-        Equal {
-            old_index: 4,
-            new_index: 4,
-            len: 1,
-        },
-    ]
-    "###);
+    insta::assert_debug_snapshot!(d.into_inner().ops());
 }
 
 #[test]
@@ -214,32 +196,7 @@ fn test_contiguous() {
 
     let mut d = crate::algorithms::Replace::new(crate::algorithms::Capture::new());
     diff_slices(&mut d, a, b).unwrap();
-    insta::assert_debug_snapshot!(d.into_inner().ops(), @r###"
-    [
-        Equal {
-            old_index: 0,
-            new_index: 0,
-            len: 3,
-        },
-        Replace {
-            old_index: 3,
-            old_len: 2,
-            new_index: 3,
-            new_len: 2,
-        },
-        Equal {
-            old_index: 5,
-            new_index: 5,
-            len: 2,
-        },
-        Replace {
-            old_index: 7,
-            old_len: 1,
-            new_index: 7,
-            new_len: 1,
-        },
-    ]
-    "###);
+    insta::assert_debug_snapshot!(d.into_inner().ops());
 }
 
 #[test]
@@ -249,33 +206,5 @@ fn test_pat() {
 
     let mut d = crate::algorithms::Capture::new();
     diff_slices(&mut d, a, b).unwrap();
-    insta::assert_debug_snapshot!(d.ops(), @r###"
-    [
-        Equal {
-            old_index: 0,
-            new_index: 0,
-            len: 2,
-        },
-        Delete {
-            old_index: 2,
-            old_len: 1,
-            new_index: 2,
-        },
-        Equal {
-            old_index: 3,
-            new_index: 2,
-            len: 2,
-        },
-        Insert {
-            old_index: 5,
-            new_index: 4,
-            new_len: 1,
-        },
-        Insert {
-            old_index: 5,
-            new_index: 5,
-            new_len: 1,
-        },
-    ]
-    "###);
+    insta::assert_debug_snapshot!(d.ops());
 }
