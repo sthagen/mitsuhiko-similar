@@ -247,15 +247,16 @@ impl DiffOp {
     ///
     /// `old` and `new` are two indexable objects like the types you pass to
     /// the diffing algorithm functions.
-    pub fn iter_changes<'x, Old, New, T>(
+    pub fn iter_changes<'x, 'lookup, Old, New, T>(
         &self,
-        old: &'x Old,
-        new: &'x New,
-    ) -> impl Iterator<Item = Change<'x, T>>
+        old: &'lookup Old,
+        new: &'lookup New,
+    ) -> impl Iterator<Item = Change<'x, T>> + 'lookup
     where
         Old: Index<usize, Output = &'x T> + ?Sized,
         New: Index<usize, Output = &'x T> + ?Sized,
         T: 'x + ?Sized,
+        'x: 'lookup,
     {
         let (tag, old_range, new_range) = self.as_tag_tuple();
         let mut old_index = old_range.start;
@@ -345,7 +346,7 @@ mod text_additions {
     use crate::text::DiffableStr;
     use std::borrow::Cow;
 
-    /// The text interface can produce changes over [`DiffableStr`] implemeting
+    /// The text interface can produce changes over [`DiffableStr`] implementing
     /// values.  As those are generic interfaces for different types of strings
     /// utility methods to make working with standard rust strings more enjoyable.
     impl<'s, T: DiffableStr + ?Sized> Change<'s, T> {

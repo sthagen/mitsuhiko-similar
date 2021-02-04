@@ -163,6 +163,11 @@ impl TextDiffConfig {
 
 /// Captures diff op codes for textual diffs.
 ///
+/// The exact diff behavior is depending on the underlying [`DiffableStr`].
+/// For instance diffs on bytes and strings are slightly different.  You can
+/// create a text diff from constructors such as [`TextDiff::from_lines`] or
+/// the [`TextDiffConfig`] created by [`TextDiff::configure`].
+///
 /// Requires the `text` feature.
 pub struct TextDiff<'old, 'new, 'bufs, T: DiffableStr + ?Sized> {
     old: Cow<'bufs, [&'old T]>,
@@ -289,7 +294,15 @@ impl<'old, 'new, 'bufs, T: DiffableStr + ?Sized + 'old + 'new> TextDiff<'old, 'n
     /// ways in which a change could be encoded (insert/delete vs replace), look
     /// up the value from the appropriate slice and also handle correct index
     /// handling.
-    pub fn iter_changes(&self, op: &DiffOp) -> impl Iterator<Item = Change<'_, T>> {
+    pub fn iter_changes<'x, 'slf>(
+        &'slf self,
+        op: &DiffOp,
+    ) -> impl Iterator<Item = Change<'x, T>> + 'slf
+    where
+        'x: 'slf,
+        'old: 'x,
+        'new: 'x,
+    {
         op.iter_changes(self.old_slices(), self.new_slices())
     }
 
@@ -305,6 +318,22 @@ impl<'old, 'new, 'bufs, T: DiffableStr + ?Sized + 'old + 'new> TextDiff<'old, 'n
         group_diff_ops(self.ops().to_vec(), n)
     }
 
+    /// Flattens out the diff into all changes.
+    ///
+    /// This is a shortcut for combining [`TextDiff::ops`] with
+    /// [`TextDiff::iter_changes`].
+    pub fn iter_all_changes<'x, 'slf>(&'slf self) -> impl Iterator<Item = Change<'x, T>> + 'slf
+    where
+        'x: 'slf,
+        'old: 'x,
+        'new: 'x,
+    {
+        // unclear why this needs Box::new here.  It seems to infer some really
+        // odd lifetimes I can't figure out how to work with.
+        Box::new(self.ops().iter().flat_map(move |op| self.iter_changes(&op)))
+            as Box<dyn Iterator<Item = _>>
+    }
+
     /// Utility to return a unified diff formatter.
     pub fn unified_diff<'diff>(&'diff self) -> UnifiedDiff<'diff, 'old, 'new, 'bufs, T> {
         UnifiedDiff::from_text_diff(self)
@@ -317,7 +346,15 @@ impl<'old, 'new, 'bufs, T: DiffableStr + ?Sized + 'old + 'new> TextDiff<'old, 'n
     /// this function with regards to how it detects those inline changes
     /// is currently not defined and will likely change over time.
     #[cfg(feature = "inline")]
-    pub fn iter_inline_changes(&self, op: &DiffOp) -> impl Iterator<Item = InlineChange<'_, T>> {
+    pub fn iter_inline_changes<'x, 'slf>(
+        &'slf self,
+        op: &DiffOp,
+    ) -> impl Iterator<Item = InlineChange<'x, T>> + 'slf
+    where
+        'x: 'slf,
+        'old: 'x,
+        'new: 'x,
+    {
         inline::iter_inline_changes(self, op)
     }
 }
@@ -359,7 +396,7 @@ pub fn get_close_matches<'a, T: DiffableStr + ?Sized>(
         let diff = TextDiff::from_slices(&seq1, &seq2);
         let ratio = diff.ratio();
         if ratio >= cutoff {
-            // we're putting the word iself in reverse in so that matches with
+            // we're putting the word itself in reverse in so that matches with
             // the same ratio are ordered lexicographically.
             matches.push(((ratio * u32::MAX as f32) as u32, Reverse(possibility)));
         }
@@ -486,4 +523,19 @@ fn test_get_close_matches() {
         0.7,
     );
     assert_eq!(matches, vec!["aulo", "hulu", "uulo", "zulo"]);
+}
+
+#[test]
+fn test_lifetimes_on_iter() {
+    fn diff_lines<'x, T>(old: &'x T, new: &'x T) -> Vec<Change<'x, T::Output>>
+    where
+        T: DiffableStrRef + ?Sized,
+    {
+        TextDiff::from_lines(old, new).iter_all_changes().collect()
+    }
+
+    let a = "1\n2\n3\n".to_string();
+    let b = "1\n99\n3\n".to_string();
+    let changes = diff_lines(&a, &b);
+    insta::assert_debug_snapshot!(&changes);
 }

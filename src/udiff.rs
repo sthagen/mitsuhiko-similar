@@ -146,7 +146,7 @@ impl<'diff, 'old, 'new, 'bufs, T: DiffableStr + ?Sized> UnifiedDiff<'diff, 'old,
     /// Sets a header to the diff.
     ///
     /// `a` and `b` are the file names that are added to the top of the unified
-    /// file format.  The names are accepted verbaitim which lets you encode
+    /// file format.  The names are accepted verbatim which lets you encode
     /// a timestamp into it when separated by a tab (`\t`).  For more information
     /// see [the unified diff format specification](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/diff.html#tag_20_34_10_07)
     pub fn header(&mut self, a: &str, b: &str) -> &mut Self {
@@ -240,11 +240,11 @@ impl<'diff, 'old, 'new, 'bufs, T: DiffableStr + ?Sized>
     pub fn iter_changes(&self) -> impl Iterator<Item = Change<'_, T>> + '_ {
         // unclear why this needs Box::new here.  It seems to infer some really
         // odd lifetimes I can't figure out how to work with.
-        (Box::new(
+        Box::new(
             self.ops()
                 .iter()
                 .flat_map(move |op| self.diff.iter_changes(op)),
-        )) as Box<dyn Iterator<Item = _>>
+        ) as Box<dyn Iterator<Item = _>>
     }
 
     /// Write the hunk as bytes to the output stream.
