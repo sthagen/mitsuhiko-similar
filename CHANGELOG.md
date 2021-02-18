@@ -2,6 +2,19 @@
 
 All notable changes to similar are documented here.
 
+## 1.3.0
+
+* Performance improvements for the LCS algorithm.
+* Small performance improvments by adding an early opt-out for and inline highlighting.
+
+## 1.2.2
+
+* Added support for Rust 1.41.0 for better compatibility.
+
+## 1.2.1
+
+* Added support for Rust 1.43.0 for better compatibility.
+
 ## 1.2.0
 
 * Make the unicode feature optional for inline diffing.
