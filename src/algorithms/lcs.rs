@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::ops::{Index, Range};
 use std::time::Instant;
 
+use crate::algorithms::utils::is_empty_range;
 use crate::algorithms::DiffHook;
 
 /// Hunt–McIlroy / Hunt–Szymanski LCS diff algorithm.
@@ -52,10 +53,10 @@ where
     D: DiffHook,
     New::Output: PartialEq<Old::Output>,
 {
-    if new_range.start >= new_range.end {
+    if is_empty_range(&new_range) {
         d.delete(old_range.start, old_range.len(), new_range.start)?;
         return Ok(());
-    } else if old_range.start >= old_range.end {
+    } else if is_empty_range(&old_range) {
         d.insert(old_range.start, new_range.start, new_range.len())?;
         return Ok(());
     }
