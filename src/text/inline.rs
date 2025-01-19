@@ -3,10 +3,10 @@ use std::fmt;
 
 use crate::text::{DiffableStr, TextDiff};
 use crate::types::{Algorithm, Change, ChangeTag, DiffOp, DiffTag};
+use crate::Instant;
 use crate::{capture_diff_deadline, get_diff_ratio};
 
 use std::ops::Index;
-use std::time::Instant;
 
 use super::utils::upper_seq_ratio;
 
@@ -76,7 +76,7 @@ impl<'bufs, 's, T: DiffableStr + ?Sized> MultiLookup<'bufs, 's, T> {
     }
 }
 
-impl<'bufs, 's, T: DiffableStr + ?Sized> Index<usize> for MultiLookup<'bufs, 's, T> {
+impl<T: DiffableStr + ?Sized> Index<usize> for MultiLookup<'_, '_, T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -176,7 +176,7 @@ impl<'s, T: DiffableStr + ?Sized> From<Change<&'s T>> for InlineChange<'s, T> {
     }
 }
 
-impl<'s, T: DiffableStr + ?Sized> fmt::Display for InlineChange<'s, T> {
+impl<T: DiffableStr + ?Sized> fmt::Display for InlineChange<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (emphasized, value) in self.iter_strings_lossy() {
             let marker = match (emphasized, self.tag) {

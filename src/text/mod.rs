@@ -2,7 +2,7 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 mod abstraction;
 #[cfg(feature = "inline")]
@@ -17,6 +17,7 @@ use self::utils::{upper_seq_ratio, QuickSeqRatio};
 use crate::algorithms::IdentifyDistinct;
 use crate::iter::{AllChangesIter, ChangesIter};
 use crate::udiff::UnifiedDiff;
+use crate::Instant;
 use crate::{capture_diff_deadline, get_diff_ratio, group_diff_ops, Algorithm, DiffOp};
 
 #[derive(Debug, Clone, Copy)]
@@ -543,7 +544,7 @@ impl<'old, 'new, 'bufs, T: DiffableStr + ?Sized + 'old + 'new> TextDiff<'old, 'n
     pub fn iter_inline_changes<'slf>(
         &'slf self,
         op: &DiffOp,
-    ) -> impl Iterator<Item = InlineChange<'slf, T>> + '_
+    ) -> impl Iterator<Item = InlineChange<'slf, T>> + 'slf
     where
         'slf: 'old + 'new,
     {
@@ -558,7 +559,7 @@ impl<'old, 'new, 'bufs, T: DiffableStr + ?Sized + 'old + 'new> TextDiff<'old, 'n
         &'slf self,
         op: &DiffOp,
         deadline: Option<Instant>,
-    ) -> impl Iterator<Item = InlineChange<'slf, T>> + '_
+    ) -> impl Iterator<Item = InlineChange<'slf, T>> + 'slf
     where
         'slf: 'old + 'new,
     {
