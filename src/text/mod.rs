@@ -11,14 +11,14 @@ mod utils;
 
 pub use self::abstraction::{DiffableStr, DiffableStrRef};
 #[cfg(feature = "inline")]
-pub use self::inline::InlineChange;
+pub use self::inline::{InlineChange, InlineChangeMode, InlineChangeOptions};
 
-use self::utils::{upper_seq_ratio, QuickSeqRatio};
+use self::utils::{QuickSeqRatio, upper_seq_ratio};
 use crate::algorithms::IdentifyDistinct;
-use crate::deadline_support::{duration_to_deadline, Instant};
+use crate::deadline_support::{Instant, duration_to_deadline};
 use crate::iter::{AllChangesIter, ChangesIter};
 use crate::udiff::UnifiedDiff;
-use crate::{capture_diff_deadline, get_diff_ratio, group_diff_ops, Algorithm, DiffOp};
+use crate::{Algorithm, DiffOp, capture_diff_deadline, get_diff_ratio, group_diff_ops};
 
 #[derive(Debug, Clone, Copy)]
 enum Deadline {
@@ -57,7 +57,7 @@ impl TextDiffConfig {
     /// Sets a deadline for the diff operation.
     ///
     /// By default a diff will take as long as it takes.  For certain diff
-    /// algorithms like Myers' and Patience a maximum running time can be
+    /// algorithms like Myers', Patience and Hunt a maximum running time can be
     /// defined after which the algorithm gives up and approximates.
     pub fn deadline(&mut self, deadline: Instant) -> &mut Self {
         self.deadline = Some(Deadline::Absolute(deadline));
@@ -535,37 +535,89 @@ impl<'old, 'new, 'bufs, T: DiffableStr + ?Sized + 'old + 'new> TextDiff<'old, 'n
     /// This method has a hardcoded 500ms deadline which is often not ideal.  For
     /// fine tuning use [`iter_inline_changes_deadline`](Self::iter_inline_changes_deadline).
     ///
-    /// As of similar 1.2.0 the behavior of this function changes depending on
-    /// if the `unicode` feature is enabled or not.  It will prefer unicode word
-    /// splitting over word splitting depending on the feature flag.
+    /// For full control over tokenization mode, algorithm and heuristics use
+    /// [`iter_inline_changes_with_options`](Self::iter_inline_changes_with_options)
+    /// or its deadline variant.
     ///
     /// Requires the `inline` feature.
     #[cfg(feature = "inline")]
-    pub fn iter_inline_changes<'slf>(
+    pub fn iter_inline_changes<'x, 'slf>(
         &'slf self,
         op: &DiffOp,
-    ) -> impl Iterator<Item = InlineChange<'slf, T>> + 'slf
+    ) -> impl Iterator<Item = InlineChange<'x, T>> + 'slf
     where
-        'slf: 'old + 'new,
+        'x: 'slf + 'old + 'new,
+        'old: 'x,
+        'new: 'x,
     {
         use crate::deadline_support::duration_to_deadline;
 
-        inline::iter_inline_changes(self, op, duration_to_deadline(Duration::from_millis(500)))
+        inline::iter_inline_changes(
+            self,
+            op,
+            duration_to_deadline(Duration::from_millis(500)),
+            InlineChangeOptions::default(),
+        )
     }
 
     /// Iterates over the changes the op expands to with inline emphasis with a deadline.
     ///
     /// Like [`iter_inline_changes`](Self::iter_inline_changes) but with an explicit deadline.
     #[cfg(feature = "inline")]
-    pub fn iter_inline_changes_deadline<'slf>(
+    pub fn iter_inline_changes_deadline<'x, 'slf>(
         &'slf self,
         op: &DiffOp,
         deadline: Option<Instant>,
-    ) -> impl Iterator<Item = InlineChange<'slf, T>> + 'slf
+    ) -> impl Iterator<Item = InlineChange<'x, T>> + 'slf
     where
-        'slf: 'old + 'new,
+        'x: 'slf + 'old + 'new,
+        'old: 'x,
+        'new: 'x,
     {
-        inline::iter_inline_changes(self, op, deadline)
+        inline::iter_inline_changes(self, op, deadline, InlineChangeOptions::default())
+    }
+
+    /// Iterates over the changes the op expands to with inline emphasis and options.
+    ///
+    /// Like [`iter_inline_changes`](Self::iter_inline_changes) but with custom
+    /// inline refinement options.  For improved human readability of intraline
+    /// edits you can enable semantic cleanup via
+    /// [`InlineChangeOptions::semantic_cleanup`].
+    #[cfg(feature = "inline")]
+    pub fn iter_inline_changes_with_options<'x, 'slf>(
+        &'slf self,
+        op: &DiffOp,
+        options: InlineChangeOptions,
+    ) -> impl Iterator<Item = InlineChange<'x, T>> + 'slf
+    where
+        'x: 'slf + 'old + 'new,
+        'old: 'x,
+        'new: 'x,
+    {
+        use crate::deadline_support::duration_to_deadline;
+
+        inline::iter_inline_changes(
+            self,
+            op,
+            duration_to_deadline(Duration::from_millis(500)),
+            options,
+        )
+    }
+
+    /// Iterates over the changes the op expands to with inline emphasis, options and deadline.
+    #[cfg(feature = "inline")]
+    pub fn iter_inline_changes_with_options_deadline<'x, 'slf>(
+        &'slf self,
+        op: &DiffOp,
+        options: InlineChangeOptions,
+        deadline: Option<Instant>,
+    ) -> impl Iterator<Item = InlineChange<'x, T>> + 'slf
+    where
+        'x: 'slf + 'old + 'new,
+        'old: 'x,
+        'new: 'x,
+    {
+        inline::iter_inline_changes(self, op, deadline, options)
     }
 }
 
@@ -654,11 +706,13 @@ fn test_unified_diff() {
         "Hello World\nsome amazing stuff here\nsome more stuff here\n",
     );
     assert!(diff.newline_terminated());
-    insta::assert_snapshot!(&diff
-        .unified_diff()
-        .context_radius(3)
-        .header("old", "new")
-        .to_string());
+    insta::assert_snapshot!(
+        &diff
+            .unified_diff()
+            .context_radius(3)
+            .header("old", "new")
+            .to_string()
+    );
 }
 
 #[test]

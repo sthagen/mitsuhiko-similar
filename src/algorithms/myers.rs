@@ -11,19 +11,14 @@
 //!
 //! # Heuristics
 //!
-//! At present this implementation of Myers' does not implement any more advanced
-//! heuristics that would solve some pathological cases.  For instance passing two
-//! large and completely distinct sequences to the algorithm will make it spin
-//! without making reasonable progress.  Currently the only protection in the
-//! library against this is to pass a deadline to the diffing algorithm.
-//!
-//! For potential improvements here see [similar#15](https://github.com/mitsuhiko/similar/issues/15).
+//! This module contains the core Myers implementation. Any higher-level
+//! pre-flight heuristics are implemented outside of this module.
 
 use std::ops::{Index, IndexMut, Range};
 
-use crate::algorithms::utils::{common_prefix_len, common_suffix_len, is_empty_range};
 use crate::algorithms::DiffHook;
-use crate::deadline_support::{deadline_exceeded, Instant};
+use crate::algorithms::utils::{common_prefix_len, common_suffix_len, is_empty_range};
+use crate::deadline_support::{Instant, deadline_exceeded};
 
 /// Myers' diff algorithm.
 ///
@@ -122,7 +117,7 @@ impl IndexMut<isize> for V {
 
 fn max_d(len1: usize, len2: usize) -> usize {
     // XXX look into reducing the need to have the additional '+ 1'
-    (len1 + len2 + 1) / 2 + 1
+    (len1 + len2).div_ceil(2) + 1
 }
 
 #[inline(always)]

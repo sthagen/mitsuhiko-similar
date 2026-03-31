@@ -1,7 +1,7 @@
 use std::hash::Hash;
 use std::ops::{Index, Range};
 
-use crate::algorithms::{diff_deadline, Capture, Compact, Replace};
+use crate::algorithms::{Capture, Compact, Replace, diff_deadline};
 use crate::deadline_support::Instant;
 use crate::{Algorithm, DiffOp};
 
@@ -182,4 +182,22 @@ fn test_non_string_iter_change() {
             (ChangeTag::Insert, 4),
         ]
     );
+}
+
+#[test]
+fn test_myers_compacts_adjacent_deletes_issue_80() {
+    let a: Vec<u8> = vec![0, 1, 0, 0, 0, 1, 2];
+    let b: Vec<u8> = vec![1, 0, 1];
+
+    let ops = capture_diff_slices(Algorithm::Myers, &a, &b);
+
+    let delete_lengths = ops
+        .iter()
+        .filter_map(|op| match op {
+            DiffOp::Delete { old_len, .. } => Some(*old_len),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(delete_lengths, vec![1, 2, 1]);
 }

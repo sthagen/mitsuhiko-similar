@@ -2,7 +2,6 @@
 
 [![Crates.io](https://img.shields.io/crates/d/similar.svg)](https://crates.io/crates/similar)
 [![License](https://img.shields.io/github/license/mitsuhiko/similar)](https://github.com/mitsuhiko/similar/blob/main/LICENSE)
-[![rustc 1.60.0](https://img.shields.io/badge/rust-1.60%2B-orange.svg)](https://img.shields.io/badge/rust-1.60%2B-orange.svg)
 [![Documentation](https://docs.rs/similar/badge.svg)](https://docs.rs/similar)
 
 Similar is a dependency free crate for Rust that implements different diffing
@@ -40,7 +39,8 @@ fn main() {
 
 * Myers' diff
 * Patience diff
-* Hunt–McIlroy / Hunt–Szymanski LCS diff
+* Hunt-style diff
+* Classic LCS table diff
 * Diffing on arbitrary comparable sequences
 * Line, word, character and grapheme level diffing
 * Text and Byte diffing

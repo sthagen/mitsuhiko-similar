@@ -1,5 +1,5 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::ops::{Add, Index, Range};
@@ -65,7 +65,7 @@ where
 ///
 /// Each item is wrapped in a [`UniqueItem`] so that both the value and the
 /// index can be extracted.
-pub fn unique<Idx>(lookup: &Idx, range: Range<usize>) -> Vec<UniqueItem<Idx>>
+pub fn unique<Idx>(lookup: &Idx, range: Range<usize>) -> Vec<UniqueItem<'_, Idx>>
 where
     Idx: Index<usize> + ?Sized,
     Idx::Output: Hash + Eq,
