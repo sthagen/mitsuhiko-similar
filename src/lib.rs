@@ -1,7 +1,7 @@
 //! This crate implements diffing utilities.  It attempts to provide an abstraction
 //! interface over different types of diffing algorithms.  The design of the
-//! library is inspired by pijul's diff library by Pierre-Étienne Meunier and
-//! also inherits the patience diff algorithm from there.
+//! library was once inspired by pijul's diff library by Pierre-Étienne Meunier
+//! and also inherits the patience diff algorithm from there.
 //!
 //! The API of the crate is split into high and low level functionality.  Most
 //! of what you probably want to use is available top level.  Additionally the
@@ -9,7 +9,9 @@
 //!
 //! * [`algorithms`]: This implements the different types of diffing algorithms.
 //!   It provides both low level access to the algorithms with the minimal
-//!   trait bounds necessary, as well as a generic interface.
+//!   trait bounds necessary, as well as a generic interface.  See the
+//!   module's **"Which algorithm should you use?"** section for practical
+//!   recommendations beyond the default [`Algorithm::Myers`].
 //! * [`udiff`]: Unified diff functionality.
 //! * [`utils`]: utilities for common diff related operations.  This module
 //!   provides additional diffing functions for working with text diffs.
@@ -27,6 +29,10 @@
 //! let b = vec![1, 2, 3, 4, 7];
 //! let ops = capture_diff_slices(Algorithm::Myers, &a, &b);
 //! ```
+//!
+//! If your sequence is computed on demand, or if you want to diff by a derived
+//! key, wrap it in [`algorithms::CachedLookup`]. This materializes each item at most
+//! once and then exposes it through normal indexing.
 //!
 //! # Text Diffing
 //!
@@ -122,7 +128,7 @@
 //! when performing a text diff.
 //!
 //! Note that on wasm targets calling [`Instant::now`] will result in a panic
-//! unless you enable the `wasm32_web_time` feataure.  By default similar will
+//! unless you enable the `wasm32_web_time` feature.  By default similar will
 //! silently disable the deadline checks internally unless that feature is
 //! enabled.
 //!
@@ -132,6 +138,9 @@
 //! cases it's useful to pull in extra functionality.  Likewise you can turn
 //! off some functionality.
 //!
+//! * `std`: enabled by default.  Turns on integration with the Rust standard
+//!   library (including deadline support via [`Instant`]).  Disabling this
+//!   feature makes the crate `no_std` compatible (with `alloc`).
 //! * `text`: this feature is enabled by default and enables the text based
 //!   diffing types such as [`TextDiff`].
 //!   If the crate is used without default features it's removed.
@@ -152,7 +161,13 @@
 //!   the `web_time` crate.  Because this is a change to the public interface,
 //!   this feature must be used with care.  The instant type for this crate is
 //!   then re-exported top-level module.
+//! * `hashbrown`: in `no_std` mode, switches internal map storage from
+//!   [`alloc::collections::BTreeMap`] to `hashbrown::HashMap`.
+#![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
 pub mod algorithms;
 pub mod iter;
 #[cfg(feature = "text")]
@@ -162,6 +177,7 @@ pub mod utils;
 
 mod common;
 mod deadline_support;
+mod lookup;
 #[cfg(feature = "text")]
 mod text;
 mod types;

@@ -15,6 +15,88 @@
 //! The algorithms module really is the most low-level module in similar and
 //! generally not the place to start.
 //!
+//! # Which Algorithm Should You Use?
+//!
+//! For most users, start with **[`Algorithm::Myers`]**.  It's the default for a
+//! reason: good general quality, good performance, and robust behavior with
+//! deadlines.
+//!
+//! If you need to tune behavior, use this rule of thumb:
+//!
+//! - **[`Algorithm::Myers`]** (default):
+//!   best all-around choice for mixed workloads.
+//! - **[`Algorithm::Patience`]**:
+//!   often more human-readable for refactors and reordered blocks, especially
+//!   when there are unique lines/tokens to anchor on.
+//! - **[`Algorithm::Histogram`]**:
+//!   good for noisy/repetitive inputs (logs, generated text, repeated lines),
+//!   as it prefers low-frequency anchors over common noise.
+//! - **[`Algorithm::Hunt`]**:
+//!   useful when matching pairs are relatively sparse and you want
+//!   Hunt/LCS-style anchoring; can use more memory on highly repetitive input.
+//! - **[`Algorithm::Lcs`]**:
+//!   mainly for small inputs, debugging, or reference behavior. It has
+//!   `O(N*M)` time/space and is usually not a good default at scale.
+//!
+//! Trade-offs to keep in mind:
+//!
+//! - `Patience` can lose its edge when there are few unique anchors.
+//! - `Histogram` may prefer readability-oriented anchors over minimal edit
+//!   scripts.
+//! - `Hunt` can degrade on inputs with many repeated matches (`R` grows large).
+//! - `Lcs` scales poorly and produces weak approximations when deadlines hit.
+//!
+//! # Heuristics
+//!
+//! Algorithm entrypoints in this module (`diff` / `diff_deadline`) are
+//! heuristic-enabled.  In practice that means they use practical shortcuts to
+//! keep difficult inputs fast while still producing useful diff scripts.
+//!
+//! At a high level, the current heuristics are:
+//!
+//! - **Shared disjoint-range fast path** (all algorithms):
+//!   if two large ranges appear to have no common items, we skip expensive
+//!   search and emit a straight delete+insert replacement.
+//! - **Prefix/suffix trimming** (used widely):
+//!   matching runs at the beginning/end are emitted immediately so each
+//!   algorithm only works on the changed middle.
+//! - **Deadline-aware fallback behavior**:
+//!   when a deadline is provided, algorithms periodically check it and may fall
+//!   back to a simpler script instead of running too long.
+//! - **Algorithm-local anchor strategies**:
+//!   - **Patience** anchors on items unique in both sides.
+//!   - **Histogram** prefers low-frequency anchors and avoids very noisy lines.
+//!   - **Hunt** uses match lists and longest-increasing anchor chains.
+//! - **Myers-specific safeguards**:
+//!   Myers follows Eugene W. Myers' shortest-edit-script approach: it finds a
+//!   "middle snake" (a central diagonal run of equal items on an optimal edit
+//!   path) and recursively diffs the left and right sides around that split.
+//!   Beyond that classic middle-snake recursion, this implementation adds a
+//!   "front-anchor peel" for heavily unbalanced shifts (it probes a few small
+//!   one-sided skips near the start to find a long shared run, emits that
+//!   prefix anchor early, then recurses on the remaining tail) and an exact
+//!   small-side fallback when one side is tiny and the other is large.
+//!
+//! Some heuristic-enabled entrypoints may require stricter trait bounds than
+//! their raw counterpart (for example, shared heuristics that build hash-based
+//! lookups require [`Hash`] + [`Eq`]). If your values need to be computed lazily
+//! or compared via a derived key, wrap them in [`CachedLookup`]
+//! first. In the remaining cases, `diff_deadline_raw` is the compatibility path
+//! with minimal bounds.
+//!
+//! If you want to skip shared heuristics, each algorithm module provides
+//! `diff_deadline_raw`, which keeps that algorithm's minimal intrinsic bounds.
+//!
+//! The top-level dispatcher [`diff_deadline`] always calls the
+//! heuristic-enabled entrypoints and never calls raw variants.
+//!
+//! # Sequence Adapters
+//!
+//! Two helpers are available when your input is not already a plain slice:
+//!
+//! - [`CachedLookup`]: lazily computes and caches sequence items on first access.
+//! - [`IdentifyDistinct`]: eagerly remaps values to dense integer IDs.
+//!
 //! # Example
 //!
 //! This is a simple example that shows how you can calculate the difference
@@ -33,19 +115,21 @@
 //! The above example is equivalent to using
 //! [`capture_diff_slices`](crate::capture_diff_slices).
 
+pub use crate::lookup::CachedLookup;
+
 mod capture;
 mod compact;
 mod hook;
+mod preflight;
 mod replace;
 pub(crate) mod utils;
 
-use std::any::type_name;
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::ops::{Index, Range};
+#[cfg(test)]
+use alloc::vec::Vec;
+use core::hash::Hash;
+use core::ops::{Index, Range};
 
-use crate::deadline_support::{Instant, deadline_exceeded};
+use crate::deadline_support::Instant;
 pub use capture::Capture;
 pub use compact::Compact;
 pub use hook::{DiffHook, NoFinishHook};
@@ -55,6 +139,7 @@ pub use utils::IdentifyDistinct;
 #[doc(no_inline)]
 pub use crate::Algorithm;
 
+pub mod histogram;
 pub mod hunt;
 pub mod lcs;
 pub mod myers;
@@ -75,8 +160,8 @@ where
     Old: Index<usize> + ?Sized,
     New: Index<usize> + ?Sized,
     D: DiffHook,
-    Old::Output: Hash + Eq + Ord,
-    New::Output: PartialEq<Old::Output> + Hash + Eq + Ord,
+    Old::Output: Hash + Eq,
+    New::Output: PartialEq<Old::Output> + Hash + Eq,
 {
     diff_deadline(alg, d, old, old_range, new, new_range, None)
 }
@@ -103,138 +188,25 @@ where
     Old: Index<usize> + ?Sized,
     New: Index<usize> + ?Sized,
     D: DiffHook,
-    Old::Output: Hash + Eq + Ord,
-    New::Output: PartialEq<Old::Output> + Hash + Eq + Ord,
+    Old::Output: Hash + Eq,
+    New::Output: PartialEq<Old::Output> + Hash + Eq,
 {
-    if maybe_emit_disjoint_fast_path(d, old, old_range.clone(), new, new_range.clone(), deadline)? {
-        return Ok(());
-    }
-
     match alg {
         Algorithm::Myers => myers::diff_deadline(d, old, old_range, new, new_range, deadline),
         Algorithm::Patience => patience::diff_deadline(d, old, old_range, new, new_range, deadline),
         Algorithm::Lcs => lcs::diff_deadline(d, old, old_range, new, new_range, deadline),
         Algorithm::Hunt => hunt::diff_deadline(d, old, old_range, new, new_range, deadline),
-    }
-}
-
-const DISJOINT_FAST_PATH_MIN_LEN: usize = 512;
-const DISJOINT_FAST_PATH_MIN_WORK: usize = 128 * 1024;
-const DISJOINT_FAST_PATH_DEADLINE_CHECK_INTERVAL: usize = 1024;
-
-fn maybe_emit_disjoint_fast_path<Old, New, D>(
-    d: &mut D,
-    old: &Old,
-    old_range: Range<usize>,
-    new: &New,
-    new_range: Range<usize>,
-    deadline: Option<Instant>,
-) -> Result<bool, D::Error>
-where
-    Old: Index<usize> + ?Sized,
-    New: Index<usize> + ?Sized,
-    D: DiffHook,
-    Old::Output: Hash + Eq + Ord,
-    New::Output: PartialEq<Old::Output> + Hash + Eq + Ord,
-{
-    if deadline_exceeded(deadline) {
-        return Ok(false);
-    }
-
-    let old_len = old_range.len();
-    let new_len = new_range.len();
-
-    if old_len < DISJOINT_FAST_PATH_MIN_LEN
-        || new_len < DISJOINT_FAST_PATH_MIN_LEN
-        || old_len.saturating_mul(new_len) < DISJOINT_FAST_PATH_MIN_WORK
-    {
-        return Ok(false);
-    }
-
-    // This fast-path relies on hashing values from both sides into the same
-    // map. Restrict it to apparent same-output types to avoid cross-type hash
-    // compatibility pitfalls.
-    if type_name::<Old::Output>() != type_name::<New::Output>() {
-        return Ok(false);
-    }
-
-    if new[new_range.start] == old[old_range.start]
-        || new[new_range.end - 1] == old[old_range.end - 1]
-    {
-        return Ok(false);
-    }
-
-    let has_common_item =
-        match has_common_item(old, old_range.clone(), new, new_range.clone(), deadline) {
-            Some(value) => value,
-            None => return Ok(false),
-        };
-
-    if has_common_item {
-        return Ok(false);
-    }
-
-    d.delete(old_range.start, old_len, new_range.start)?;
-    d.insert(old_range.start, new_range.start, new_len)?;
-    d.finish()?;
-    Ok(true)
-}
-
-fn has_common_item<Old, New>(
-    old: &Old,
-    old_range: Range<usize>,
-    new: &New,
-    new_range: Range<usize>,
-    deadline: Option<Instant>,
-) -> Option<bool>
-where
-    Old: Index<usize> + ?Sized,
-    New: Index<usize> + ?Sized,
-    Old::Output: Hash,
-    New::Output: PartialEq<Old::Output> + Hash,
-{
-    #[inline(always)]
-    fn hash_value<T: Hash + ?Sized>(value: &T) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        value.hash(&mut hasher);
-        hasher.finish()
-    }
-
-    let mut by_hash = HashMap::<u64, Vec<usize>>::new();
-    for (idx, old_idx) in old_range.enumerate() {
-        if (idx & (DISJOINT_FAST_PATH_DEADLINE_CHECK_INTERVAL - 1) == 0)
-            && deadline_exceeded(deadline)
-        {
-            return None;
-        }
-        by_hash
-            .entry(hash_value(&old[old_idx]))
-            .or_default()
-            .push(old_idx);
-    }
-
-    for (idx, new_idx) in new_range.enumerate() {
-        if (idx & (DISJOINT_FAST_PATH_DEADLINE_CHECK_INTERVAL - 1) == 0)
-            && deadline_exceeded(deadline)
-        {
-            return None;
-        }
-        if let Some(candidates) = by_hash.get(&hash_value(&new[new_idx])) {
-            let new_item = &new[new_idx];
-            if candidates.iter().any(|&old_idx| new_item == &old[old_idx]) {
-                return Some(true);
-            }
+        Algorithm::Histogram => {
+            histogram::diff_deadline(d, old, old_range, new, new_range, deadline)
         }
     }
-
-    Some(false)
 }
 
 /// Shortcut for diffing slices with a specific algorithm.
 pub fn diff_slices<D, T>(alg: Algorithm, d: &mut D, old: &[T], new: &[T]) -> Result<(), D::Error>
 where
     D: DiffHook,
-    T: Eq + Hash + Ord,
+    T: Eq + Hash,
 {
     diff(alg, d, old, 0..old.len(), new, 0..new.len())
 }
@@ -249,59 +221,15 @@ pub fn diff_slices_deadline<D, T>(
 ) -> Result<(), D::Error>
 where
     D: DiffHook,
-    T: Eq + Hash + Ord,
+    T: Eq + Hash,
 {
     diff_deadline(alg, d, old, 0..old.len(), new, 0..new.len(), deadline)
 }
 
 #[test]
-fn test_has_common_item() {
-    assert_eq!(
-        has_common_item(&[1, 2, 3], 0..3, &[9, 3, 10], 0..3, None),
-        Some(true)
-    );
-    assert_eq!(
-        has_common_item(&[1, 2, 3], 0..3, &[9, 8, 10], 0..3, None),
-        Some(false)
-    );
-}
-
-#[test]
-fn test_has_common_item_hash_collisions() {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    struct Collide(u32);
-
-    impl Hash for Collide {
-        fn hash<H: Hasher>(&self, state: &mut H) {
-            0u8.hash(state);
-        }
-    }
-
-    assert_eq!(
-        has_common_item(
-            &[Collide(1), Collide(2)],
-            0..2,
-            &[Collide(3), Collide(4)],
-            0..2,
-            None
-        ),
-        Some(false)
-    );
-    assert_eq!(
-        has_common_item(
-            &[Collide(1), Collide(2)],
-            0..2,
-            &[Collide(3), Collide(2)],
-            0..2,
-            None
-        ),
-        Some(true)
-    );
-}
-
-#[test]
 fn test_disjoint_fast_path_cross_type_guard() {
     use crate::DiffOp;
+    use std::hash::{Hash, Hasher};
 
     #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
     struct A(u32);

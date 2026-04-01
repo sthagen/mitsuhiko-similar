@@ -4,6 +4,11 @@ All notable changes to similar are documented here.
 
 ## Unreleased
 
+## 3.0.0
+
+* Added a Git-style Histogram diff implementation exposed as
+  `Algorithm::Histogram`, including deadline-aware Myers fallback and
+  comprehensive regression/behavior tests.
 * Raised MSRV to Rust 1.85 and moved the crate to Rust 2024 edition.
 * Added a Hunt-style diff implementation exposed as `Algorithm::Hunt`.
 * Added configurable inline refinement via `InlineChangeOptions` and
@@ -11,11 +16,38 @@ All notable changes to similar are documented here.
   `TextDiff::iter_inline_changes_with_options*` methods.  #92
 * Added a global disjoint-input fast path in `algorithms::diff_deadline`
   to avoid pathological runtimes on large, fully distinct inputs.
+* Improved `Algorithm::Myers` performance on heavily unbalanced diffs to
+  avoid pathological slowdowns.
+* Added `diff_deadline_raw` entrypoints in the algorithm modules to bypass
+  shared heuristics and keep minimal intrinsic trait bounds where needed.
 * Added test files in `examples/diffs` that can be used with the some of the
   examples as input pairs.
+* Added `CachedLookup`, a helper for adapting virtual or computed sequences by
+  materializing items on first access and then serving borrowed values through
+  normal indexing.  The `owned-lookup` example demonstrates this approach for
+  issue #33.
 * Fixed ranged indexing in the classic LCS table algorithm.
 * Improved diff compaction to merge adjacent delete hunks across equal runs.
 * Excluded development scripts from published crate contents.  #87
+* `TextDiff::from_*` and `TextDiffConfig::diff_*` now accept owned inputs
+  (`String`, `Vec<u8>`, `Cow`) in addition to borrowed inputs.  This allows
+  returning text diffs from functions without external owner lifetimes.  #65
+* `TextDiff` no longer exposes `old_slices` / `new_slices`.  Use
+  `old_len`, `new_len`, `old_slice`, `new_slice`, `iter_old_slices`,
+  `iter_new_slices`, `old_lookup`, and `new_lookup` instead.
+* `TextDiff::iter_changes` now panics on invalid out-of-bounds `DiffOp`
+  ranges instead of silently truncating iteration.
+* `utils::diff_lines_inline` now takes `&TextDiff` and options rather than
+  `(Algorithm, old, new, options)`.
+* `utils::diff_lines` now avoids a second line-tokenization pass.
+* Renamed `get_diff_ratio` to `diff_ratio`.
+* Added first-class `no_std + alloc` support with an explicit default `std`
+  feature.
+* Added optional `hashbrown` backend for `no_std` map storage
+  (`default-features = false, features = ["hashbrown"]`), while the default
+  `no_std` backend uses `alloc::collections::BTreeMap`.
+* Made core constructors const-ready (`Capture::new`, `Replace::new`,
+  `NoFinishHook::new`, `InlineChangeOptions::new`, `TextDiff::configure`).
 
 ## 2.7.0
 

@@ -4,11 +4,19 @@
 //! walks it forward to emit operations.
 //! * time: `O(N*M)`
 //! * space `O(N*M)`
-use std::collections::BTreeMap;
-use std::ops::{Index, Range};
+//!
+//! # Heuristics
+//!
+//! See [`crate::algorithms`] for shared heuristics and the
+//! `diff_deadline_raw` API.
+use alloc::collections::BTreeMap;
+#[cfg(test)]
+use alloc::vec;
+use core::hash::Hash;
+use core::ops::{Index, Range};
 
-use crate::algorithms::DiffHook;
 use crate::algorithms::utils::{common_prefix_len, common_suffix_len, is_empty_range};
+use crate::algorithms::{DiffHook, preflight};
 use crate::deadline_support::{Instant, deadline_exceeded};
 
 /// Classic LCS table diff algorithm.
@@ -30,7 +38,8 @@ where
     Old: Index<usize> + ?Sized,
     New: Index<usize> + ?Sized,
     D: DiffHook,
-    New::Output: PartialEq<Old::Output>,
+    Old::Output: Hash + Eq,
+    New::Output: PartialEq<Old::Output> + Hash + Eq,
 {
     diff_deadline(d, old, old_range, new, new_range, None)
 }
@@ -42,6 +51,54 @@ where
 /// This diff is done with an optional deadline that defines the maximal
 /// execution time permitted before it bails and falls back to an approximation.
 pub fn diff_deadline<Old, New, D>(
+    d: &mut D,
+    old: &Old,
+    old_range: Range<usize>,
+    new: &New,
+    new_range: Range<usize>,
+    deadline: Option<Instant>,
+) -> Result<(), D::Error>
+where
+    Old: Index<usize> + ?Sized,
+    New: Index<usize> + ?Sized,
+    D: DiffHook,
+    Old::Output: Hash + Eq,
+    New::Output: PartialEq<Old::Output> + Hash + Eq,
+{
+    if preflight::maybe_emit_disjoint_fast_path(
+        d,
+        old,
+        old_range.clone(),
+        new,
+        new_range.clone(),
+        deadline,
+    )? {
+        return Ok(());
+    }
+
+    diff_deadline_impl(d, old, old_range, new, new_range, deadline)
+}
+
+/// Raw classic LCS table diff algorithm with deadline and without shared
+/// heuristics.
+pub fn diff_deadline_raw<Old, New, D>(
+    d: &mut D,
+    old: &Old,
+    old_range: Range<usize>,
+    new: &New,
+    new_range: Range<usize>,
+    deadline: Option<Instant>,
+) -> Result<(), D::Error>
+where
+    Old: Index<usize> + ?Sized,
+    New: Index<usize> + ?Sized,
+    D: DiffHook,
+    New::Output: PartialEq<Old::Output>,
+{
+    diff_deadline_impl(d, old, old_range, new, new_range, deadline)
+}
+
+fn diff_deadline_impl<Old, New, D>(
     d: &mut D,
     old: &Old,
     old_range: Range<usize>,
@@ -211,6 +268,17 @@ fn test_diff() {
     let mut d = crate::algorithms::Replace::new(crate::algorithms::Capture::new());
     diff(&mut d, a, 0..a.len(), b, 0..b.len()).unwrap();
     insta::assert_debug_snapshot!(d.into_inner().ops());
+}
+
+#[test]
+fn test_raw_accepts_partialeq_only_values() {
+    let old = [1.0f32, 2.0, 3.0];
+    let new = [1.0f32, 4.0, 3.0];
+
+    let mut d = crate::algorithms::Capture::new();
+    diff_deadline_raw(&mut d, &old, 0..old.len(), &new, 0..new.len(), None).unwrap();
+
+    assert!(!d.ops().is_empty());
 }
 
 #[test]

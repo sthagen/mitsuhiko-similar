@@ -5,11 +5,10 @@
 [![Documentation](https://docs.rs/similar/badge.svg)](https://docs.rs/similar)
 
 Similar is a dependency free crate for Rust that implements different diffing
-algorithms and high level interfaces for it. It is based on the
-[pijul](https://pijul.org/) implementation of the Patience algorithm and
-inherits some ideas from there. It also incorporates the Myers' diff
-algorithm which was largely written by Brandon Williams.  This library was
-built for the [insta snapshot testing library](https://insta.rs).
+algorithms and high level interfaces for it.  It was originally inspired by
+[pijul](https://pijul.org/)'s diff library but has since changed significantly.
+This library was built for the [insta snapshot testing
+library](https://insta.rs).
 
 ```rust
 use similar::{ChangeTag, TextDiff};
@@ -40,11 +39,28 @@ fn main() {
 * Myers' diff
 * Patience diff
 * Hunt-style diff
+* Histogram diff
 * Classic LCS table diff
 * Diffing on arbitrary comparable sequences
 * Line, word, character and grapheme level diffing
 * Text and Byte diffing
 * Unified diff generation
+
+## no_std Support
+
+`similar` now enables `std` by default.
+
+For `no_std + alloc` usage:
+
+```toml
+[dependencies]
+similar = { version = "3", default-features = false }
+```
+
+Backend selection in `no_std` mode:
+
+- default (`default-features = false`): `alloc::collections::BTreeMap`
+- `default-features = false, features = ["hashbrown"]`: `hashbrown::HashMap`
 
 ## Related Projects
 
@@ -54,6 +70,7 @@ fn main() {
 ## License and Links
 
 * [Documentation](https://docs.rs/similar/)
+* [Upgrading Guide (2.7 to 3.0)](UPGRADING.md)
 * [Issue Tracker](https://github.com/mitsuhiko/similar/issues)
 * [Examples](https://github.com/mitsuhiko/similar/tree/main/examples)
 * License: [Apache-2.0](https://github.com/mitsuhiko/similar/blob/main/LICENSE)

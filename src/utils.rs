@@ -25,12 +25,14 @@
 //! optimize towards returning the most useful slice that one would expect for
 //! the type of diff performed.
 
-use std::hash::Hash;
-use std::ops::{Index, Range};
+use alloc::vec::Vec;
+use core::hash::Hash;
+use core::ops::{Index, Range};
 
 use crate::{
     Algorithm, ChangeTag, DiffOp, DiffableStr, DiffableStrRef, TextDiff, capture_diff_slices,
 };
+
 #[cfg(feature = "inline")]
 use crate::{InlineChange, InlineChangeOptions};
 
@@ -40,17 +42,22 @@ struct SliceRemapper<'x, T: ?Sized> {
 }
 
 impl<'x, T: DiffableStr + ?Sized> SliceRemapper<'x, T> {
-    fn new(source: &'x T, slices: &[&'x T]) -> SliceRemapper<'x, T> {
-        let indexes = slices
-            .iter()
-            .scan(0, |state, item| {
-                let start = *state;
-                let end = start + item.len();
-                *state = end;
-                Some(start..end)
-            })
-            .collect();
+    fn from_lengths(
+        source: &'x T,
+        lengths: impl IntoIterator<Item = usize>,
+    ) -> SliceRemapper<'x, T> {
+        let mut offset = 0;
+        let mut indexes = Vec::new();
+        for len in lengths {
+            let end = offset + len;
+            indexes.push(offset..end);
+            offset = end;
+        }
         SliceRemapper { source, indexes }
+    }
+
+    fn new(source: &'x T, slices: &[&'x T]) -> SliceRemapper<'x, T> {
+        Self::from_lengths(source, slices.iter().map(|item| item.len()))
     }
 
     fn slice(&self, range: Range<usize>) -> Option<&'x T> {
@@ -70,7 +77,7 @@ impl<T: DiffableStr + ?Sized> Index<Range<usize>> for SliceRemapper<'_, T> {
 
 /// A remapper that can remap diff ops to the original slices.
 ///
-/// The idea here is that when a [`TextDiff`](crate::TextDiff) is created from
+/// The idea here is that when a [`TextDiff`] is created from
 /// two strings and the internal tokenization is used, this remapper can take
 /// a range in the tokenized sequences and remap it to the original string.
 /// This is particularly useful when you want to do things like character or
@@ -116,8 +123,8 @@ impl<'x, T: DiffableStr + ?Sized> TextDiffRemapper<'x, T> {
     }
 
     /// Creates a new remapper from a text diff and the original strings.
-    pub fn from_text_diff<'old, 'new, 'bufs>(
-        diff: &TextDiff<'old, 'new, 'bufs, T>,
+    pub fn from_text_diff<'old, 'new>(
+        diff: &TextDiff<'old, 'new, T>,
         old: &'x T,
         new: &'x T,
     ) -> TextDiffRemapper<'x, T>
@@ -126,8 +133,16 @@ impl<'x, T: DiffableStr + ?Sized> TextDiffRemapper<'x, T> {
         'new: 'x,
     {
         TextDiffRemapper {
-            old: SliceRemapper::new(old, diff.old_slices()),
-            new: SliceRemapper::new(new, diff.new_slices()),
+            old: SliceRemapper::from_lengths(
+                old,
+                (0..diff.old_len())
+                    .map(|idx| diff.old_slice(idx).expect("slice out of bounds").len()),
+            ),
+            new: SliceRemapper::from_lengths(
+                new,
+                (0..diff.new_len())
+                    .map(|idx| diff.new_slice(idx).expect("slice out of bounds").len()),
+            ),
         }
     }
 
@@ -396,33 +411,29 @@ pub fn diff_lines<'x, T: DiffableStrRef + ?Sized>(
     old: &'x T,
     new: &'x T,
 ) -> Vec<(ChangeTag, &'x T::Output)> {
-    TextDiff::configure()
-        .algorithm(alg)
-        .diff_lines(old, new)
-        .iter_all_changes()
+    let old = old.as_diffable_str();
+    let new = new.as_diffable_str();
+    let old_slices = old.tokenize_lines();
+    let new_slices = new.tokenize_lines();
+    capture_diff_slices(alg, &old_slices, &new_slices)
+        .iter()
+        .flat_map(|op| op.iter_changes(&old_slices, &new_slices))
         .map(|change| (change.tag(), change.value()))
         .collect()
 }
 
-/// Shortcut for making a line diff with inline refinement.
+/// Expands a line diff into [`InlineChange`] values.
 ///
-/// This expands the line diff into [`InlineChange`] values by applying
-/// [`TextDiff::iter_inline_changes_with_options`] with the provided options.
+/// This applies [`TextDiff::iter_all_inline_changes_with_options`] to the
+/// passed diff object.
 ///
 /// Requires the `inline` feature.
 #[cfg(feature = "inline")]
-pub fn diff_lines_inline<'x, T: DiffableStrRef + ?Sized>(
-    alg: Algorithm,
-    old: &'x T,
-    new: &'x T,
+pub fn diff_lines_inline<'diff, 'old, 'new, T: DiffableStr + ?Sized>(
+    diff: &'diff TextDiff<'old, 'new, T>,
     options: InlineChangeOptions,
-) -> Vec<InlineChange<'x, T::Output>> {
-    let diff = TextDiff::configure().algorithm(alg).diff_lines(old, new);
-    let mut rv = Vec::new();
-    for op in diff.ops() {
-        rv.extend(diff.iter_inline_changes_with_options(op, options));
-    }
-    rv
+) -> Vec<InlineChange<'diff, T>> {
+    diff.iter_all_inline_changes_with_options(options).collect()
 }
 
 #[test]

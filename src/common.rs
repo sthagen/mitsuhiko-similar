@@ -1,5 +1,7 @@
-use std::hash::Hash;
-use std::ops::{Index, Range};
+use alloc::vec;
+use alloc::vec::Vec;
+use core::hash::Hash;
+use core::ops::{Index, Range};
 
 use crate::algorithms::{Capture, Compact, Replace, diff_deadline};
 use crate::deadline_support::Instant;
@@ -9,7 +11,8 @@ use crate::{Algorithm, DiffOp};
 ///
 /// This is like [`diff`](crate::algorithms::diff) but instead of using an
 /// arbitrary hook this will always use [`Compact`] + [`Replace`] + [`Capture`]
-/// and return the captured [`DiffOp`]s.
+/// and return the captured [`DiffOp`]s. For lazily computed values or diffing
+/// by a derived key, see [`crate::algorithms::CachedLookup`].
 pub fn capture_diff<Old, New>(
     alg: Algorithm,
     old: &Old,
@@ -20,8 +23,8 @@ pub fn capture_diff<Old, New>(
 where
     Old: Index<usize> + ?Sized,
     New: Index<usize> + ?Sized,
-    Old::Output: Hash + Eq + Ord,
-    New::Output: PartialEq<Old::Output> + Hash + Eq + Ord,
+    Old::Output: Hash + Eq,
+    New::Output: PartialEq<Old::Output> + Hash + Eq,
 {
     capture_diff_deadline(alg, old, old_range, new, new_range, None)
 }
@@ -40,8 +43,8 @@ pub fn capture_diff_deadline<Old, New>(
 where
     Old: Index<usize> + ?Sized,
     New: Index<usize> + ?Sized,
-    Old::Output: Hash + Eq + Ord,
-    New::Output: PartialEq<Old::Output> + Hash + Eq + Ord,
+    Old::Output: Hash + Eq,
+    New::Output: PartialEq<Old::Output> + Hash + Eq,
 {
     let mut d = Compact::new(Replace::new(Capture::new()), old, new);
     diff_deadline(alg, &mut d, old, old_range, new, new_range, deadline).unwrap();
@@ -49,9 +52,12 @@ where
 }
 
 /// Creates a diff between old and new with the given algorithm capturing the ops.
+///
+/// For lazily computed values or diffing by a derived key, see
+/// [`crate::algorithms::CachedLookup`].
 pub fn capture_diff_slices<T>(alg: Algorithm, old: &[T], new: &[T]) -> Vec<DiffOp>
 where
-    T: Eq + Hash + Ord,
+    T: Eq + Hash,
 {
     capture_diff_slices_deadline(alg, old, new, None)
 }
@@ -66,7 +72,7 @@ pub fn capture_diff_slices_deadline<T>(
     deadline: Option<Instant>,
 ) -> Vec<DiffOp>
 where
-    T: Eq + Hash + Ord,
+    T: Eq + Hash,
 {
     capture_diff_deadline(alg, old, 0..old.len(), new, 0..new.len(), deadline)
 }
@@ -77,7 +83,7 @@ where
 /// ratio of `0.0` would indicate completely distinct sequences.  The input
 /// is the sequence of diff operations and the length of the old and new
 /// sequence.
-pub fn get_diff_ratio(ops: &[DiffOp], old_len: usize, new_len: usize) -> f32 {
+pub fn diff_ratio(ops: &[DiffOp], old_len: usize, new_len: usize) -> f32 {
     let matches = ops
         .iter()
         .map(|op| {
@@ -200,4 +206,64 @@ fn test_myers_compacts_adjacent_deletes_issue_80() {
         .collect::<Vec<_>>();
 
     assert_eq!(delete_lengths, vec![1, 2, 1]);
+}
+
+#[test]
+fn test_myers_unbalanced_regressions() {
+    {
+        let mut old = (0..3_000u32).collect::<Vec<_>>();
+        let mut new = (0..2_999u32).collect::<Vec<_>>();
+
+        old[2_999] = 1_000_000;
+        new.push(2_000_000);
+        new.extend((0..100_000u32).map(|i| 3_000_000 + i));
+
+        let ops = capture_diff_slices(Algorithm::Myers, &old, &new);
+
+        assert_eq!(
+            ops,
+            vec![
+                DiffOp::Equal {
+                    old_index: 0,
+                    new_index: 0,
+                    len: 2_999,
+                },
+                DiffOp::Replace {
+                    old_index: 2_999,
+                    old_len: 1,
+                    new_index: 2_999,
+                    new_len: 100_001,
+                },
+            ]
+        );
+    }
+
+    {
+        let mut old = (0..3_008u32).collect::<Vec<_>>();
+        let mut new = (0..3_000u32).collect::<Vec<_>>();
+
+        // Make the old tail distinct from the new tail except for a single
+        // sparse overlap far into the new side.
+        for i in 0..8 {
+            old[3_000 + i] = 1_000_000 + i as u32;
+        }
+
+        new.extend((0..100_000u32).map(|i| 2_000_000 + i));
+        new[3_000 + 50_000] = 1_000_000;
+
+        let ops = capture_diff_slices(Algorithm::Myers, &old, &new);
+
+        // Ensure the sparse overlap is preserved (do not collapse into one
+        // large replace due to pathological fallback behavior).
+        assert!(ops.iter().any(|op| {
+            matches!(
+                op,
+                DiffOp::Equal {
+                    old_index: 3_000,
+                    new_index: 53_000,
+                    len: 1,
+                }
+            )
+        }));
+    }
 }

@@ -1,12 +1,15 @@
-use std::borrow::Cow;
-use std::fmt;
+use alloc::borrow::Cow;
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::fmt;
 
 use crate::deadline_support::Instant;
 use crate::text::{DiffableStr, TextDiff};
 use crate::types::{Algorithm, Change, ChangeTag, DiffOp, DiffTag};
-use crate::{capture_diff_deadline, get_diff_ratio};
+use crate::{capture_diff_deadline, diff_ratio};
 
-use std::ops::Index;
+use core::ops::Index;
 
 use super::utils::upper_seq_ratio;
 
@@ -49,19 +52,19 @@ pub struct InlineChangeOptions {
 
 impl Default for InlineChangeOptions {
     fn default() -> Self {
+        InlineChangeOptions::new()
+    }
+}
+
+impl InlineChangeOptions {
+    /// Creates default inline change options.
+    pub const fn new() -> Self {
         InlineChangeOptions {
             algorithm: Algorithm::Patience,
             mode: InlineChangeMode::Auto,
             min_ratio: 0.5,
             semantic_cleanup: false,
         }
-    }
-}
-
-impl InlineChangeOptions {
-    /// Creates default inline change options.
-    pub fn new() -> Self {
-        Self::default()
     }
 
     /// Sets the algorithm used for second-level refinement inside replaced ranges.
@@ -96,24 +99,48 @@ impl InlineChangeOptions {
         self
     }
 
-    /// Returns the configured algorithm.
-    pub fn get_algorithm(&self) -> Algorithm {
+    /// Returns the algorithm used for second-level refinement.
+    pub fn refinement_algorithm(&self) -> Algorithm {
         self.algorithm
     }
 
-    /// Returns the configured tokenization mode.
-    pub fn get_mode(&self) -> InlineChangeMode {
+    /// Returns the tokenization mode used for second-level refinement.
+    pub fn refinement_mode(&self) -> InlineChangeMode {
         self.mode
     }
 
-    /// Returns the configured minimum ratio threshold.
-    pub fn get_min_ratio(&self) -> f32 {
+    /// Returns the minimum ratio threshold required for inline refinement.
+    pub fn minimum_ratio(&self) -> f32 {
         self.min_ratio
     }
 
-    /// Returns if semantic cleanup is enabled.
-    pub fn get_semantic_cleanup(&self) -> bool {
+    /// Returns `true` if semantic cleanup is enabled.
+    pub fn semantic_cleanup_enabled(&self) -> bool {
         self.semantic_cleanup
+    }
+
+    /// Returns the configured algorithm.
+    #[deprecated(note = "use refinement_algorithm()")]
+    pub fn get_algorithm(&self) -> Algorithm {
+        self.refinement_algorithm()
+    }
+
+    /// Returns the configured tokenization mode.
+    #[deprecated(note = "use refinement_mode()")]
+    pub fn get_mode(&self) -> InlineChangeMode {
+        self.refinement_mode()
+    }
+
+    /// Returns the configured minimum ratio threshold.
+    #[deprecated(note = "use minimum_ratio()")]
+    pub fn get_min_ratio(&self) -> f32 {
+        self.minimum_ratio()
+    }
+
+    /// Returns if semantic cleanup is enabled.
+    #[deprecated(note = "use semantic_cleanup_enabled()")]
+    pub fn get_semantic_cleanup(&self) -> bool {
+        self.semantic_cleanup_enabled()
     }
 }
 
@@ -785,7 +812,7 @@ where
     Old: Index<usize, Output = T> + ?Sized,
     New: Index<usize, Output = T> + ?Sized,
 {
-    let mut expanded = expand_replace_ops(std::mem::take(ops));
+    let mut expanded = expand_replace_ops(core::mem::take(ops));
     merge_inline_ops(&mut expanded);
     cleanup_inline_overlaps::<_, _, T>(old, new, &mut expanded);
     cleanup_semantic_lossless::<_, _, T>(old, new, &mut expanded);
@@ -793,39 +820,44 @@ where
     *ops = expanded;
 }
 
-pub(crate) fn iter_inline_changes<'x, 'diff, 'old, 'new, 'bufs, T>(
-    diff: &'diff TextDiff<'old, 'new, 'bufs, T>,
+pub(crate) fn iter_inline_changes<'diff, 'old, 'new, T>(
+    diff: &'diff TextDiff<'old, 'new, T>,
     op: &DiffOp,
     deadline: Option<Instant>,
     options: InlineChangeOptions,
-) -> impl Iterator<Item = InlineChange<'x, T>> + 'diff
+) -> impl Iterator<Item = InlineChange<'diff, T>> + 'diff
 where
     T: DiffableStr + ?Sized,
-    'x: 'diff,
-    'old: 'x,
-    'new: 'x,
 {
     let (tag, old_range, new_range) = op.as_tag_tuple();
 
     if let DiffTag::Equal | DiffTag::Insert | DiffTag::Delete = tag {
-        return Box::new(diff.iter_changes(op).map(|x| x.into())) as Box<dyn Iterator<Item = _>>;
+        return Box::new(diff.iter_changes(op).map(InlineChange::from))
+            as Box<dyn Iterator<Item = _>>;
     }
 
     let mut old_index = old_range.start;
     let mut new_index = new_range.start;
-    let old_slices = &diff.old_slices()[old_range];
-    let new_slices = &diff.new_slices()[new_range];
-    let min_ratio = options.get_min_ratio();
+    let old_slices = old_range
+        .clone()
+        .map(|idx| diff.old_slice(idx).expect("slice out of bounds"))
+        .collect::<Vec<_>>();
+    let new_slices = new_range
+        .clone()
+        .map(|idx| diff.new_slice(idx).expect("slice out of bounds"))
+        .collect::<Vec<_>>();
+    let min_ratio = options.minimum_ratio();
 
-    if upper_seq_ratio(old_slices, new_slices) < min_ratio {
-        return Box::new(diff.iter_changes(op).map(|x| x.into())) as Box<dyn Iterator<Item = _>>;
+    if upper_seq_ratio(&old_slices, &new_slices) < min_ratio {
+        return Box::new(diff.iter_changes(op).map(InlineChange::from))
+            as Box<dyn Iterator<Item = _>>;
     }
 
-    let old_lookup = MultiLookup::new(old_slices, options.get_mode());
-    let new_lookup = MultiLookup::new(new_slices, options.get_mode());
+    let old_lookup = MultiLookup::new(&old_slices, options.refinement_mode());
+    let new_lookup = MultiLookup::new(&new_slices, options.refinement_mode());
 
     let mut ops = capture_diff_deadline(
-        options.get_algorithm(),
+        options.refinement_algorithm(),
         &old_lookup,
         0..old_lookup.len(),
         &new_lookup,
@@ -833,11 +865,12 @@ where
         deadline,
     );
 
-    if get_diff_ratio(&ops, old_lookup.len(), new_lookup.len()) < min_ratio {
-        return Box::new(diff.iter_changes(op).map(|x| x.into())) as Box<dyn Iterator<Item = _>>;
+    if diff_ratio(&ops, old_lookup.len(), new_lookup.len()) < min_ratio {
+        return Box::new(diff.iter_changes(op).map(InlineChange::from))
+            as Box<dyn Iterator<Item = _>>;
     }
 
-    if options.get_semantic_cleanup() {
+    if options.semantic_cleanup_enabled() {
         cleanup_inline_semantic::<_, _, T>(&old_lookup, &new_lookup, &mut ops);
     }
 
@@ -926,6 +959,63 @@ fn test_line_ops_inline() {
         .flat_map(|op| diff.iter_inline_changes(op))
         .collect::<Vec<_>>();
     insta::assert_debug_snapshot!(&changes);
+}
+
+#[test]
+fn test_iter_all_inline_changes_helpers_match_manual_iteration() {
+    let diff = TextDiff::from_lines(
+        "Hello World\nsome stuff here\nsome more stuff here\n\nAha stuff here\nand more stuff",
+        "Stuff\nHello World\nsome amazing stuff here\nsome more stuff here\n",
+    );
+
+    let expected_default = diff
+        .ops()
+        .iter()
+        .flat_map(|op| diff.iter_inline_changes(op))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        diff.iter_all_inline_changes().collect::<Vec<_>>(),
+        expected_default
+    );
+
+    let expected_deadline = diff
+        .ops()
+        .iter()
+        .flat_map(|op| diff.iter_inline_changes_deadline(op, None))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        diff.iter_all_inline_changes_deadline(None)
+            .collect::<Vec<_>>(),
+        expected_deadline
+    );
+
+    let mut options = InlineChangeOptions::new();
+    options
+        .mode(InlineChangeMode::Chars)
+        .semantic_cleanup(true)
+        .min_ratio(0.25);
+
+    let expected_options = diff
+        .ops()
+        .iter()
+        .flat_map(|op| diff.iter_inline_changes_with_options(op, options))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        diff.iter_all_inline_changes_with_options(options)
+            .collect::<Vec<_>>(),
+        expected_options
+    );
+
+    let expected_options_deadline = diff
+        .ops()
+        .iter()
+        .flat_map(|op| diff.iter_inline_changes_with_options_deadline(op, options, None))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        diff.iter_all_inline_changes_with_options_deadline(options, None)
+            .collect::<Vec<_>>(),
+        expected_options_deadline
+    );
 }
 
 #[test]
