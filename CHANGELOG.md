@@ -4,6 +4,8 @@ All notable changes to similar are documented here.
 
 ## Unreleased
 
+## 3.1.1
+
 * Fixed `DiffOp` cursor positions when compacting adjacent inserts/deletes and
   in `Algorithm::Histogram` full-replacement output, ensuring operations form
   contiguous ranges.  #95
