@@ -194,6 +194,32 @@ fn normalize_diff_op_cursors(ops: &mut [DiffOp]) {
     }
 }
 
+fn swap_adjacent_insert_delete(ops: &mut [DiffOp], left: usize) {
+    let right = left + 1;
+    debug_assert!(matches!(
+        (ops[left].tag(), ops[right].tag()),
+        (DiffTag::Insert, DiffTag::Delete) | (DiffTag::Delete, DiffTag::Insert)
+    ));
+
+    let old_start = ops[left].old_range().start;
+    let old_end = ops[right].old_range().end;
+    let new_start = ops[left].new_range().start;
+    let new_end = ops[right].new_range().end;
+
+    ops.swap(left, right);
+
+    match &mut ops[left] {
+        DiffOp::Insert { old_index, .. } => *old_index = old_start,
+        DiffOp::Delete { new_index, .. } => *new_index = new_start,
+        _ => unreachable!("expected insert/delete pair"),
+    }
+    match &mut ops[right] {
+        DiffOp::Insert { old_index, .. } => *old_index = old_end,
+        DiffOp::Delete { new_index, .. } => *new_index = new_end,
+        _ => unreachable!("expected insert/delete pair"),
+    }
+}
+
 fn shift_diff_ops_up<Old, New>(
     ops: &mut Vec<DiffOp>,
     old: &Old,
@@ -284,9 +310,11 @@ where
                     break;
                 }
             }
-            // Swap the Delete and Insert
+            // Swap the Delete and Insert.  Since the two ops consume input on
+            // different sides, their cursor positions need to be patched up to
+            // keep the stream contiguous after swapping.
             (DiffTag::Insert, DiffTag::Delete) | (DiffTag::Delete, DiffTag::Insert) => {
-                ops.swap(pointer - 1, pointer);
+                swap_adjacent_insert_delete(ops, pointer - 1);
                 pointer -= 1;
             }
             // Merge the two ranges
@@ -379,7 +407,7 @@ where
                         ops.insert(
                             pointer,
                             DiffOp::Equal {
-                                old_index: next_op.old_range().start,
+                                old_index: this_op.old_range().start,
                                 new_index: this_op.new_range().start,
                                 len: prefix_len,
                             },
@@ -399,9 +427,11 @@ where
                     break;
                 }
             }
-            // Swap the Delete and Insert
+            // Swap the Delete and Insert.  Since the two ops consume input on
+            // different sides, their cursor positions need to be patched up to
+            // keep the stream contiguous after swapping.
             (DiffTag::Insert, DiffTag::Delete) | (DiffTag::Delete, DiffTag::Insert) => {
-                ops.swap(pointer, pointer + 1);
+                swap_adjacent_insert_delete(ops, pointer);
                 pointer += 1;
             }
             // Merge the two ranges

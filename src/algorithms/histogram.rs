@@ -235,7 +235,7 @@ where
             }
             SearchResult::None => {
                 d.delete(old_range.start, old_range.len(), new_range.start)?;
-                d.insert(old_range.start, new_range.start, new_range.len())?;
+                d.insert(old_range.end, new_range.start, new_range.len())?;
             }
             SearchResult::Fallback => {
                 let mut myers_hook = NoFinishHook::new(&mut *d);

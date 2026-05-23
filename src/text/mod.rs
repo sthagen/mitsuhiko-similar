@@ -1167,6 +1167,48 @@ fn test_regression_issue_37() {
     let mut output = diff.unified_diff();
     assert_eq!(
         output.context_radius(0).to_string(),
-        "@@ -1 +1,0 @@\n-\u{18}\n@@ -2,0 +2,2 @@\n+\n+\r"
+        "@@ -1 +0,0 @@\n-\u{18}\n@@ -2,0 +2,2 @@\n+\n+\r"
     );
+}
+
+#[test]
+fn test_regression_issue_95() {
+    let old = "d\na\nc\nb\na\na";
+    let new = "b\nd\nd\na\nd";
+    let old_lines = old.split_inclusive('\n').collect::<Vec<_>>();
+    let new_lines = new.split_inclusive('\n').collect::<Vec<_>>();
+    let diff = TextDiff::from_lines(old, new);
+
+    let mut old_cursor = 0;
+    let mut new_cursor = 0;
+    for op in diff.ops() {
+        assert_eq!(
+            op.old_range().start,
+            old_cursor,
+            "old cursor mismatch for {op:?}"
+        );
+        assert_eq!(
+            op.new_range().start,
+            new_cursor,
+            "new cursor mismatch for {op:?}"
+        );
+
+        if let DiffOp::Equal {
+            old_index,
+            new_index,
+            len,
+        } = *op
+        {
+            assert_eq!(
+                &old_lines[old_index..old_index + len],
+                &new_lines[new_index..new_index + len],
+                "Equal op {op:?} names unequal slices",
+            );
+        }
+
+        old_cursor = op.old_range().end;
+        new_cursor = op.new_range().end;
+    }
+    assert_eq!(old_cursor, old_lines.len());
+    assert_eq!(new_cursor, new_lines.len());
 }
