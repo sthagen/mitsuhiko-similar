@@ -4,6 +4,12 @@ All notable changes to similar are documented here.
 
 ## Unreleased
 
+* Fixed `DiffOp` cursor positions when compacting adjacent inserts/deletes and
+  in `Algorithm::Histogram` full-replacement output, ensuring operations form
+  contiguous ranges.  #95
+* Renamed sample diff input files to a lexicographic
+  `caseNN.01.before_*` / `caseNN.02.after_*` scheme.
+
 ## 3.1.0
 
 * Added `capture_diff_slices_by_key` and `capture_diff_slices_by_key_deadline`
