@@ -3,6 +3,8 @@ use alloc::vec::Vec;
 use core::hash::Hash;
 use core::ops::{Index, Range};
 
+#[cfg(test)]
+use crate::algorithms::diff_slices;
 use crate::algorithms::{Capture, Compact, Replace, diff_deadline};
 use crate::deadline_support::Instant;
 use crate::{Algorithm, DiffOp};
@@ -252,6 +254,49 @@ fn test_compact_keeps_diffop_cursors_contiguous() {
             "new_index gap at op {i}: {prev:?} -> {op:?}"
         );
     }
+}
+
+#[test]
+fn test_compact_preserves_non_zero_range_cursors() {
+    let old = vec![9, 1, 1, 0, 2, 9];
+    let new = vec![8, 2, 1, 0, 0, 0, 0, 8];
+    let ops = capture_diff(Algorithm::Myers, &old, 1..5, &new, 1..7);
+
+    let mut old_cursor = 1;
+    let mut new_cursor = 1;
+    for op in &ops {
+        assert_eq!(op.old_range().start, old_cursor, "old_index gap at {op:?}");
+        assert_eq!(op.new_range().start, new_cursor, "new_index gap at {op:?}");
+        old_cursor = op.old_range().end;
+        new_cursor = op.new_range().end;
+    }
+    assert_eq!(old_cursor, 5);
+    assert_eq!(new_cursor, 7);
+}
+
+#[test]
+fn test_histogram_full_range_delete_insert_cursors() {
+    let old = vec![2, 2];
+    let new = vec![0];
+    let mut hook = Capture::new();
+
+    diff_slices(Algorithm::Histogram, &mut hook, &old, &new).unwrap();
+
+    assert_eq!(
+        hook.into_ops(),
+        vec![
+            DiffOp::Delete {
+                old_index: 0,
+                old_len: 2,
+                new_index: 0,
+            },
+            DiffOp::Insert {
+                old_index: 2,
+                new_index: 0,
+                new_len: 1,
+            },
+        ]
+    );
 }
 
 #[test]
