@@ -4,6 +4,15 @@ All notable changes to similar are documented here.
 
 ## Unreleased
 
+## 3.1.2
+
+* Fixed `Algorithm::Lcs` deadline fallback emitting edits twice, which produced
+  out-of-bounds `DiffOp` ranges and panics when consuming timed-out diffs.  #97
+* Fixed `Algorithm::Lcs` reporting identical subranges with zero-based indices
+  instead of preserving the supplied range offsets.  #98
+* Fixed `Algorithm::Lcs` and `Algorithm::Hunt` emitting zero-length delete
+  operations when both inputs are empty.  #99
+
 ## 3.1.1
 
 * Fixed `DiffOp` cursor positions when compacting adjacent inserts/deletes and

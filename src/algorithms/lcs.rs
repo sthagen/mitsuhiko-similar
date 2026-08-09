@@ -112,7 +112,10 @@ where
     D: DiffHook,
     New::Output: PartialEq<Old::Output>,
 {
-    if is_empty_range(&new_range) {
+    if is_empty_range(&old_range) && is_empty_range(&new_range) {
+        d.finish()?;
+        return Ok(());
+    } else if is_empty_range(&new_range) {
         d.delete(old_range.start, old_range.len(), new_range.start)?;
         d.finish()?;
         return Ok(());
@@ -132,7 +135,7 @@ where
 
     // If the sequences are not different then we're done
     if common_prefix_len == old_range.len() && (old_range.len() == new_range.len()) {
-        d.equal(0, 0, old_range.len())?;
+        d.equal(old_range.start, new_range.start, old_range.len())?;
         d.finish()?;
         return Ok(());
     }
@@ -172,13 +175,10 @@ where
                 new_idx += 1;
             }
         }
-    } else {
-        let old_orig_idx = old_range.start + common_prefix_len + old_idx;
-        let new_orig_idx = new_range.start + common_prefix_len + new_idx;
-        d.delete(old_orig_idx, old_len, new_orig_idx)?;
-        d.insert(old_orig_idx, new_orig_idx, new_len)?;
     }
 
+    // Emit any unconsumed tail. If table construction exceeded the deadline,
+    // both cursors are still zero and this becomes the fallback edit script.
     if old_idx < old_len {
         d.delete(
             old_range.start + common_prefix_len + old_idx,
@@ -281,6 +281,48 @@ fn test_raw_accepts_partialeq_only_values() {
     assert!(!d.ops().is_empty());
 }
 
+#[cfg(feature = "std")]
+#[test]
+fn test_deadline_fallback_issue_97() {
+    use core::time::Duration;
+
+    use crate::DiffOp;
+    use crate::algorithms::Capture;
+
+    let old = [1u32, 2];
+    let new = [3u32, 4];
+    let deadline = Instant::now()
+        .checked_sub(Duration::from_millis(1))
+        .unwrap();
+    let mut d = Capture::new();
+
+    diff_deadline_raw(
+        &mut d,
+        &old,
+        0..old.len(),
+        &new,
+        0..new.len(),
+        Some(deadline),
+    )
+    .unwrap();
+
+    assert_eq!(
+        d.into_ops(),
+        vec![
+            DiffOp::Delete {
+                old_index: 0,
+                old_len: 2,
+                new_index: 0,
+            },
+            DiffOp::Insert {
+                old_index: 2,
+                new_index: 0,
+                new_len: 2,
+            },
+        ]
+    );
+}
+
 #[test]
 fn test_contiguous() {
     let a: &[usize] = &[0, 1, 2, 3, 4, 4, 4, 5];
@@ -380,6 +422,31 @@ fn test_subrange_regression() {
                 new_index: 6,
             },
         ]
+    );
+}
+
+#[test]
+fn test_identical_subrange_issue_98() {
+    use crate::{Algorithm, ChangeTag, DiffOp, capture_diff};
+
+    let old = ["a", "b", "c"];
+    let new = ["z", "b", "c"];
+    let ops = capture_diff(Algorithm::Lcs, &old, 1..3, &new, 1..3);
+
+    assert_eq!(
+        ops,
+        vec![DiffOp::Equal {
+            old_index: 1,
+            new_index: 1,
+            len: 2,
+        }]
+    );
+    assert_eq!(
+        ops.iter()
+            .flat_map(|op| op.iter_changes(&old, &new))
+            .map(|change| (change.tag(), change.value()))
+            .collect::<Vec<_>>(),
+        vec![(ChangeTag::Equal, "b"), (ChangeTag::Equal, "c")]
     );
 }
 
