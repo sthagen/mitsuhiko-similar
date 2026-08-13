@@ -36,7 +36,7 @@ fn main() {
 
 ## What's in the box?
 
-* Myers' diff
+* Practical heuristic Myers diff and raw Myers diff
 * Patience diff
 * Hunt-style diff
 * Histogram diff
@@ -61,6 +61,12 @@ Backend selection in `no_std` mode:
 
 - default (`default-features = false`): `alloc::collections::BTreeMap`
 - `default-features = false, features = ["hashbrown"]`: `hashbrown::HashMap`
+
+## Performance Testing
+
+The repository includes [Criterion and allocation benchmarks](benches/README.md)
+and a [generative performance fuzzer](fuzz/README.md) that isolates every diff
+algorithm, captures stacks on timeouts, and saves reproducible input pairs.
 
 ## Related Projects
 
