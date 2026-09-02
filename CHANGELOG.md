@@ -4,14 +4,25 @@ All notable changes to similar are documented here.
 
 ## Unreleased
 
+* Fixed `TextMerge::labels` writing carriage returns and newlines verbatim into
+  conflict markers, which let a label add lines to the output that looked like
+  merged content.  Line terminators in labels are now replaced with spaces.
+  #101
+
+## 3.2.0
+
+* Added structured, line-oriented three-way merging through `TextMerge`, with
+  merge and diff3 conflict output, configurable labels and marker sizes, owned
+  and borrowed inputs, byte output, and whitespace-insensitive comparison.
+* Added `WhitespaceMode` and `TextDiffConfig::whitespace_mode` for Git-style
+  line comparisons that ignore changes in whitespace (`-b`) or all whitespace
+  (`-w`).
 * Changed `Algorithm::Myers` to reduce unmatched/confusing records and use
   Git-style bounded, non-minimal splits on expensive searches, and added
   `Algorithm::RawMyers` for the previous shortest-edit-script behavior without
   output-changing heuristics.
+* Improved heuristics and performance for most algorithms other than LCS.
 * Improved large-input performance by avoiding quadratic Histogram scans.
-* Reduced allocations in hash-based indexing, changed LCS tables to compact
-  contiguous storage, and sized Myers working memory after trimming common
-  input edges.
 
 ## 3.1.2
 

@@ -1,6 +1,6 @@
 [package]
 name = "similar"
-version = "3.1.2"
+version = "3.2.0"
 authors = [
     "Armin Ronacher <armin.ronacher@active-4.com>",
     "Pierre-Étienne Meunier <pe@pijul.org>",
@@ -46,6 +46,10 @@ hashbrown = { version = "0.15", optional = true, default-features = false, featu
 [[example]]
 name = "patience"
 required-features = ["text", "inline"]
+
+[[example]]
+name = "whitespace"
+required-features = ["text"]
 
 [[example]]
 name = "terminal"
